@@ -29,8 +29,48 @@ const findNearestZones = (currentLat, currentLon, zones, maxDistance = 50000) =>
     .sort((a, b) => a.distance - b.distance);
 };
 
+const checkGeofenceBreach = async (currentLat, currentLon) => {
+  const supabase = require('../config/database');
+  
+  try {
+    // Get all active restricted zones
+    const { data: zones, error } = await supabase
+      .from('restricted_zones')
+      .select('*')
+      .eq('is_active', true);
+
+    if (error) throw error;
+
+    // Check if current location is inside any restricted zone
+    for (const zone of zones || []) {
+      const distance = calculateDistance(currentLat, currentLon, zone.latitude, zone.longitude);
+      
+      if (distance <= zone.radius_meters) {
+        return {
+          isAnomaly: true,
+          type: 'geofence_breach',
+          severity: zone.risk_level,
+          details: {
+            zoneName: zone.name,
+            zoneType: zone.zone_type,
+            riskLevel: zone.risk_level,
+            distanceMeters: Math.round(distance),
+            zoneRadius: zone.radius_meters
+          }
+        };
+      }
+    }
+
+    return { isAnomaly: false };
+  } catch (error) {
+    console.error('Geofence breach check error:', error);
+    return { isAnomaly: false };
+  }
+};
+
 module.exports = {
   calculateDistance,
   isInsideGeofence,
-  findNearestZones
+  findNearestZones,
+  checkGeofenceBreach
 };

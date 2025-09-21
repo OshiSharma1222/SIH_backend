@@ -1,10 +1,11 @@
 const supabase = require('../config/database');
-const { 
-  detectInactivity, 
-  detectRouteDeviation, 
-  detectAltitudeDrop, 
-  detectSpeedAnomaly 
+const {
+  detectInactivity,
+  detectRouteDeviation,
+  detectAltitudeDrop,
+  detectSpeedAnomaly
 } = require('../utils/anomalyDetection');
+const { checkGeofenceBreach } = require('../utils/geofencing');
 const { updateSafetyScore } = require('../services/safetyScoreService');
 
 const checkAnomalies = async (req, res) => {
@@ -68,6 +69,15 @@ const checkAnomalies = async (req, res) => {
     const speedCheck = detectSpeedAnomaly(locations);
     if (speedCheck.isAnomaly) {
       anomalies.push(speedCheck);
+    }
+
+    // Check for geofence breach
+    const geofenceCheck = await checkGeofenceBreach(
+      latestLocation.latitude, 
+      latestLocation.longitude
+    );
+    if (geofenceCheck.isAnomaly) {
+      anomalies.push(geofenceCheck);
     }
 
     // Store new anomalies in database
@@ -144,13 +154,28 @@ const resolveAnomaly = async (req, res) => {
       });
     }
 
+    // First get the current anomaly to preserve existing metadata
+    const { data: currentAnomaly, error: fetchError } = await supabase
+      .from('anomalies')
+      .select('metadata')
+      .eq('id', anomalyId)
+      .single();
+
+    if (fetchError) throw fetchError;
+    if (!currentAnomaly) {
+      return res.status(404).json({
+        success: false,
+        message: 'Anomaly not found'
+      });
+    }
+
     const { data: anomaly, error } = await supabase
       .from('anomalies')
       .update({
         status: status,
         resolved_at: new Date().toISOString(),
         metadata: { 
-          ...anomaly?.metadata, 
+          ...currentAnomaly.metadata, 
           resolution_notes: notes 
         }
       })
